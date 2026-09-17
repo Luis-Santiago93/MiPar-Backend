@@ -307,6 +307,14 @@ def save_zone(zone_id: str, body: Payload, _: str = Depends(admin_session), db: 
     data = body.model_dump(); zone = db.get(Zone, zone_id) or Zone(id=zone_id); zone.name=data["name"].strip(); zone.fee=data["fee"]; zone.weekdays=data["weekdays"]; zone.delivery_times=data["deliveryTimes"]; zone.available=bool(data["available"]); db.add(zone); db.commit(); return zone_json(zone)
 
 
+@app.delete("/api/admin/zones/{zone_id}", status_code=204)
+def delete_zone(zone_id: str, _: str = Depends(admin_session), db: Session = Depends(db_session)):
+    zone = db.get(Zone, zone_id)
+    if not zone: raise HTTPException(404, "Zona no encontrada")
+    if db.scalar(select(Order.id).where(Order.zone_id == zone_id).limit(1)): raise HTTPException(409, "La zona tiene pedidos registrados")
+    db.delete(zone); db.commit()
+
+
 @app.put("/api/admin/products/{product_id}")
 def save_product(product_id: str, body: Payload, _: str = Depends(admin_session), db: Session = Depends(db_session)):
     data=body.model_dump(); variants=data.get("variants") or []
