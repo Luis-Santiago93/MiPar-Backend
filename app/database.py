@@ -26,7 +26,11 @@ def database_engine():
     connect_args = {}
     if sslmode in ("require", "verify-ca", "verify-full") or (production and sslmode is None):
         # Require TLS and verify the server certificate and hostname.
-        connect_args["ssl_context"] = ssl.create_default_context()
+        context = ssl.create_default_context()
+        ca_cert = os.getenv("DATABASE_SSL_CA_CERT")
+        if ca_cert:
+            context.load_verify_locations(cadata=ca_cert.replace("\\n", "\n").strip())
+        connect_args["ssl_context"] = context
     elif sslmode == "disable" and not production:
         connect_args["ssl_context"] = False
     elif sslmode is not None:

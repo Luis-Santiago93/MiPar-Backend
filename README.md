@@ -40,6 +40,13 @@ del Transaction Pooler (puerto 6543) en `POSTGRES_URL`, con `sslmode=require`.
 El backend adapta esa URL a pg8000, verifica TLS y usa `NullPool` para que
 Supabase gestione las conexiones. Vuelve a desplegar tras cambiar las variables.
 
+Si aparece `CERTIFICATE_VERIFY_FAILED`, descarga el certificado CA desde
+Supabase > Database Settings > SSL Configuration > Download Certificate.
+En Vercel agrega `DATABASE_SSL_CA_CERT` con el contenido PEM completo del
+archivo (incluidas las líneas BEGIN/END CERTIFICATE) para Production y vuelve
+a desplegar. Admite saltos de línea reales o `\n` literales. El backend añade
+esta CA a las autoridades de confianza y mantiene la verificación del servidor.
+
 No hacen falta las claves `SUPABASE_*` para esta conexión SQL. `JWT_SECRET`
 sigue siendo una clave propia del backend, distinta de `SUPABASE_JWT_SECRET`.
 El arranque crea las tablas y los datos iniciales; no migra los datos del SQLite
