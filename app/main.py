@@ -78,7 +78,7 @@ class ProductRequest(Base):
     product_id: Mapped[str] = mapped_column(String(60))
     product_name: Mapped[str] = mapped_column(String(150))
     color: Mapped[str] = mapped_column(String(80))
-    size: Mapped[int] = mapped_column(Integer)
+    size: Mapped[float] = mapped_column(Float)
     customer: Mapped[dict] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(20), default="nueva")
 
@@ -182,6 +182,9 @@ async def lifespan(_: FastAPI):
             connection.execute(text("ALTER TABLE products ADD COLUMN images JSON"))
         if "sale_price" not in columns:
             connection.execute(text("ALTER TABLE products ADD COLUMN sale_price FLOAT"))
+        request_columns = {column["name"]: column for column in inspect(connection).get_columns("product_requests")}
+        if engine.dialect.name == "postgresql" and not isinstance(request_columns["size"]["type"], Float):
+            connection.execute(text("ALTER TABLE product_requests ALTER COLUMN size TYPE DOUBLE PRECISION USING size::double precision"))
     with SessionLocal() as db:
         seed(db)
     yield
@@ -306,7 +309,14 @@ def save_zone(zone_id: str, body: Payload, _: str = Depends(admin_session), db: 
 
 @app.put("/api/admin/products/{product_id}")
 def save_product(product_id: str, body: Payload, _: str = Depends(admin_session), db: Session = Depends(db_session)):
-    data=body.model_dump(); product=db.get(Product, product_id) or Product(id=product_id); product.name=data["name"].strip(); product.category=data["category"].strip(); product.price=data["price"]; sale_price=data.get("salePrice"); product.sale_price=float(sale_price) if sale_price and 0 < float(sale_price) < product.price else None; product.description=data.get("description","").strip(); product.variants=data["variants"]; product.colors=list(dict.fromkeys(v["color"] for v in data["variants"])); images=list(dict.fromkeys(image.strip() for image in (data.get("images") or [data.get("image", "")]) if image and image.strip())); product.images=images; product.image=images[0] if images else ""; product.tone=data.get("tone","sand"); product.badge=data.get("badge") or None; product.request_only=bool(data.get("requestOnly")); db.add(product); db.commit(); return product_json(product)
+    data=body.model_dump(); variants=data.get("variants") or []
+    keys=set()
+    for variant in variants:
+        size=variant.get("size"); stock=variant.get("stock"); color=str(variant.get("color", "")).strip(); key=(color, size)
+        if not color or isinstance(size, bool) or not isinstance(size, (int, float)) or size < 1 or not float(size * 2).is_integer() or isinstance(stock, bool) or not isinstance(stock, int) or stock < 0 or key in keys:
+            raise HTTPException(400, "Las tallas deben avanzar de medio número (por ejemplo, 26 o 26.5) y las existencias deben ser enteras")
+        keys.add(key)
+    product=db.get(Product, product_id) or Product(id=product_id); product.name=data["name"].strip(); product.category=data["category"].strip(); product.price=data["price"]; sale_price=data.get("salePrice"); product.sale_price=float(sale_price) if sale_price and 0 < float(sale_price) < product.price else None; product.description=data.get("description","").strip(); product.variants=data["variants"]; product.colors=list(dict.fromkeys(v["color"] for v in data["variants"])); images=list(dict.fromkeys(image.strip() for image in (data.get("images") or [data.get("image", "")]) if image and image.strip())); product.images=images; product.image=images[0] if images else ""; product.tone=data.get("tone","sand"); product.badge=data.get("badge") or None; product.request_only=bool(data.get("requestOnly")); db.add(product); db.commit(); return product_json(product)
 
 
 @app.delete("/api/admin/products/{product_id}", status_code=204)
