@@ -31,6 +31,20 @@ En el proyecto del frontend configura `NUXT_BACKEND_BASE_URL=https://tu-backend.
 
 ## API
 
+### Supabase desde Vercel
+
+El backend usa `DATABASE_URL` si tiene valor; en su ausencia usa `POSTGRES_URL`
+de la integración de Supabase. En Vercel configura `ENVIRONMENT=production` y
+elimina cualquier `DATABASE_URL` de desarrollo que apunte a SQLite. Usa la URL
+del Transaction Pooler (puerto 6543) en `POSTGRES_URL`, con `sslmode=require`.
+El backend adapta esa URL a pg8000, verifica TLS y usa `NullPool` para que
+Supabase gestione las conexiones. Vuelve a desplegar tras cambiar las variables.
+
+No hacen falta las claves `SUPABASE_*` para esta conexión SQL. `JWT_SECRET`
+sigue siendo una clave propia del backend, distinta de `SUPABASE_JWT_SECRET`.
+El arranque crea las tablas y los datos iniciales; no migra los datos del SQLite
+local. No guardes contraseñas ni URLs reales de conexión en el repositorio.
+
 Las rutas públicas cubren productos, zonas, geocodificación inversa, cotizaciones, pedidos y solicitudes. Las rutas `/api/admin/*` exigen una sesión iniciada e incluyen productos, inventario, dashboard, pedidos, solicitudes, zonas y carga de imágenes.
 
 Para desarrollo se usa SQLite y se crean datos iniciales automáticamente. En producción usa PostgreSQL porque el sistema de archivos de una función no es almacenamiento persistente.
