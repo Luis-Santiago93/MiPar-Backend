@@ -347,10 +347,17 @@ def inventory(_: str = Depends(admin_session), db: Session = Depends(db_session)
 
 @app.get("/api/admin/dashboard")
 def dashboard(_: str = Depends(admin_session), db: Session = Depends(db_session)):
-    orders=db.scalars(select(Order)).all(); sold=[o for o in orders if o.status=="vendido"]; by_day={}
-    for o in sold:
-        day=(o.sold_at or o.created_at).date().isoformat(); entry=by_day.setdefault(day,{"date":day,"orders":0,"total":0}); entry["orders"]+=1; entry["total"]+=o.total
-    products=db.scalars(select(Product)).all(); return {"soldCount":len(sold),"soldTotal":sum(o.total for o in sold),"pendingCount":sum(o.status!="vendido" for o in orders),"availablePairs":sum(v["stock"] for p in products for v in p.variants),"salesByDay":sorted(by_day.values(),key=lambda x:x["date"],reverse=True)}
+    orders=db.scalars(select(Order)).all(); sold=[o for o in orders if o.status=="vendido"]
+    by_day={}; payments={}; top_products={}; sold_pairs=0
+    for order in sold:
+        day_key=(order.sold_at or order.created_at).date().isoformat()
+        pairs=sum(line.get("quantity", 0) for line in order.lines); sold_pairs+=pairs
+        day=by_day.setdefault(day_key,{"date":day_key,"orders":0,"pairs":0,"total":0}); day["orders"]+=1; day["pairs"]+=pairs; day["total"]+=order.total
+        payment=payments.setdefault(order.payment_method,{"method":order.payment_method,"orders":0,"total":0}); payment["orders"]+=1; payment["total"]+=order.total
+        for line in order.lines:
+            product=top_products.setdefault(line["productId"],{"productId":line["productId"],"name":line["name"],"pairs":0,"total":0}); product["pairs"]+=line["quantity"]; product["total"]+=line["lineTotal"]
+    sold_total=sum(order.total for order in sold); products=db.scalars(select(Product)).all()
+    return {"soldCount":len(sold),"soldTotal":sold_total,"soldPairs":sold_pairs,"averageTicket":sold_total/len(sold) if sold else 0,"pendingCount":sum(order.status!="vendido" for order in orders),"availablePairs":sum(v["stock"] for product in products for v in product.variants),"salesByDay":sorted(by_day.values(),key=lambda item:item["date"]),"payments":sorted(payments.values(),key=lambda item:item["total"],reverse=True),"topProducts":sorted(top_products.values(),key=lambda item:item["pairs"],reverse=True)[:5]}
 
 
 @app.post("/api/admin/uploads")
