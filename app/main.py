@@ -284,8 +284,11 @@ def admin_orders(_: str = Depends(admin_session), db: Session = Depends(db_sessi
 def update_order(order_id: str, body: Payload, _: str = Depends(admin_session), db: Session = Depends(db_session)):
     order = db.get(Order, order_id); status = body.model_dump().get("status")
     if not order: raise HTTPException(404, "Pedido no encontrado")
-    if status not in ["nuevo", "confirmado", "vendido"]: raise HTTPException(400, "Estado inválido")
-    if order.status == "vendido" and status != "vendido": raise HTTPException(409, "La venta concretada no puede cambiar")
+    if status not in ["nuevo", "confirmado", "vendido", "cancelado"]: raise HTTPException(400, "Estado inválido")
+    if order.status in ["vendido", "cancelado"] and status != order.status: raise HTTPException(409, "El pedido ya tiene un estado final y no puede cambiar")
+    if status == "cancelado" and order.status != "cancelado":
+        for item in order.items:
+            product=db.get(Product,item["productId"]); variants=[dict(variant) for variant in product.variants]; variant=next(variant for variant in variants if variant["color"]==item["color"] and variant["size"]==item["size"]); variant["stock"]+=item["quantity"]; product.variants=variants
     order.status = status
     if status == "vendido" and order.sold_at is None:
         order.sold_at = datetime.now(timezone.utc)
@@ -300,7 +303,8 @@ def admin_requests(_: str = Depends(admin_session), db: Session = Depends(db_ses
 def update_request(request_id: str, body: Payload, _: str = Depends(admin_session), db: Session = Depends(db_session)):
     req = db.get(ProductRequest, request_id); status = body.model_dump().get("status")
     if not req: raise HTTPException(404, "Solicitud no encontrada")
-    if status not in ["nueva", "contactada", "cerrada"]: raise HTTPException(400, "Estado inválido")
+    if status not in ["nueva", "contactada", "cerrada", "cancelada"]: raise HTTPException(400, "Estado inválido")
+    if req.status == "cancelada" and status != "cancelada": raise HTTPException(409, "La solicitud cancelada no puede reactivarse")
     req.status = status; db.commit(); return request_json(req)
 
 
@@ -357,7 +361,7 @@ def dashboard(_: str = Depends(admin_session), db: Session = Depends(db_session)
         for line in order.lines:
             product=top_products.setdefault(line["productId"],{"productId":line["productId"],"name":line["name"],"pairs":0,"total":0}); product["pairs"]+=line["quantity"]; product["total"]+=line["lineTotal"]
     sold_total=sum(order.total for order in sold); products=db.scalars(select(Product)).all()
-    return {"soldCount":len(sold),"soldTotal":sold_total,"soldPairs":sold_pairs,"averageTicket":sold_total/len(sold) if sold else 0,"pendingCount":sum(order.status!="vendido" for order in orders),"availablePairs":sum(v["stock"] for product in products for v in product.variants),"salesByDay":sorted(by_day.values(),key=lambda item:item["date"]),"payments":sorted(payments.values(),key=lambda item:item["total"],reverse=True),"topProducts":sorted(top_products.values(),key=lambda item:item["pairs"],reverse=True)[:5]}
+    return {"soldCount":len(sold),"soldTotal":sold_total,"soldPairs":sold_pairs,"averageTicket":sold_total/len(sold) if sold else 0,"pendingCount":sum(order.status not in ["vendido","cancelado"] for order in orders),"availablePairs":sum(v["stock"] for product in products for v in product.variants),"salesByDay":sorted(by_day.values(),key=lambda item:item["date"]),"payments":sorted(payments.values(),key=lambda item:item["total"],reverse=True),"topProducts":sorted(top_products.values(),key=lambda item:item["pairs"],reverse=True)[:5]}
 
 
 @app.post("/api/admin/uploads")
