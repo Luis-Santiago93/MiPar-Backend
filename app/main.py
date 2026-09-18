@@ -65,6 +65,7 @@ class Order(Base):
     zone_name: Mapped[str] = mapped_column(String(120))
     delivery_date: Mapped[str] = mapped_column(String(10))
     delivery_time: Mapped[str] = mapped_column(String(5))
+    payment_method: Mapped[str] = mapped_column(String(20), default="efectivo")
     subtotal: Mapped[float] = mapped_column(Float)
     delivery_fee: Mapped[float] = mapped_column(Float)
     total: Mapped[float] = mapped_column(Float)
@@ -104,7 +105,7 @@ def zone_json(z: Zone, public: bool = False) -> dict:
 
 
 def order_json(o: Order) -> dict:
-    return {"id": o.id, "createdAt": o.created_at.isoformat(), "soldAt": o.sold_at.isoformat() if o.sold_at else None, "customer": o.customer, "items": o.items, "lines": o.lines, "zoneId": o.zone_id, "zoneName": o.zone_name, "deliveryDate": o.delivery_date, "deliveryTime": o.delivery_time, "subtotal": o.subtotal, "deliveryFee": o.delivery_fee, "total": o.total, "currency": "MXN", "status": o.status, "simulated": False}
+    return {"id": o.id, "createdAt": o.created_at.isoformat(), "soldAt": o.sold_at.isoformat() if o.sold_at else None, "customer": o.customer, "items": o.items, "lines": o.lines, "zoneId": o.zone_id, "zoneName": o.zone_name, "deliveryDate": o.delivery_date, "deliveryTime": o.delivery_time, "paymentMethod": o.payment_method, "subtotal": o.subtotal, "deliveryFee": o.delivery_fee, "total": o.total, "currency": "MXN", "status": o.status, "simulated": False}
 
 
 def request_json(r: ProductRequest) -> dict:
@@ -182,6 +183,9 @@ async def lifespan(_: FastAPI):
             connection.execute(text("ALTER TABLE products ADD COLUMN images JSON"))
         if "sale_price" not in columns:
             connection.execute(text("ALTER TABLE products ADD COLUMN sale_price FLOAT"))
+        order_columns = {column["name"] for column in inspect(connection).get_columns("orders")}
+        if "payment_method" not in order_columns:
+            connection.execute(text("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(20) NOT NULL DEFAULT 'efectivo'"))
         request_columns = {column["name"]: column for column in inspect(connection).get_columns("product_requests")}
         if engine.dialect.name == "postgresql" and not isinstance(request_columns["size"]["type"], Float):
             connection.execute(text("ALTER TABLE product_requests ALTER COLUMN size TYPE DOUBLE PRECISION USING size::double precision"))
@@ -236,11 +240,13 @@ def order_quote(body: Payload, db: Session = Depends(db_session)): return quote(
 def create_order(body: Payload, db: Session = Depends(db_session)):
     data = body.model_dump(); customer = data.get("customer") or {}; phone = normalize_phone(customer.get("phone", ""))
     if len(customer.get("name", "").strip()) < 2 or len(phone) != 10 or len(customer.get("address", "").strip()) < 8: raise HTTPException(400, "Completa nombre, teléfono de 10 dígitos y dirección")
+    payment_method = data.get("paymentMethod")
+    if payment_method not in ["efectivo", "transferencia", "tarjeta"]: raise HTTPException(400, "Selecciona un método de pago")
     totals, zone = quote(data, db); lines = []
     for item in data["items"]:
         p = db.get(Product, item["productId"]); variants = [dict(v) for v in p.variants]; v = next(v for v in variants if v["color"] == item["color"] and v["size"] == item["size"]); v["stock"] -= item["quantity"]; p.variants = variants
         lines.append({"productId": p.id, "name": p.name, "color": item["color"], "size": item["size"], "quantity": item["quantity"], "unitPrice": p.sale_price or p.price, "lineTotal": (p.sale_price or p.price) * item["quantity"]})
-    now = datetime.now(timezone.utc); consecutive = (db.scalar(select(func.count(Order.id))) or 0) + 1; order = Order(id=f"JIREH-{int(now.timestamp()):X}-{consecutive:04d}", created_at=now, customer={**customer, "phone": phone}, items=data["items"], lines=lines, zone_id=zone.id, zone_name=zone.name, delivery_date=data["deliveryDate"], delivery_time=data["deliveryTime"], subtotal=totals["subtotal"], delivery_fee=totals["deliveryFee"], total=totals["total"], status="nuevo")
+    now = datetime.now(timezone.utc); consecutive = (db.scalar(select(func.count(Order.id))) or 0) + 1; order = Order(id=f"JIREH-{int(now.timestamp()):X}-{consecutive:04d}", created_at=now, customer={**customer, "phone": phone}, items=data["items"], lines=lines, zone_id=zone.id, zone_name=zone.name, delivery_date=data["deliveryDate"], delivery_time=data["deliveryTime"], payment_method=payment_method, subtotal=totals["subtotal"], delivery_fee=totals["deliveryFee"], total=totals["total"], status="nuevo")
     db.add(order); db.commit(); return order_json(order)
 
 
